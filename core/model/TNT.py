@@ -34,9 +34,6 @@ class TNT(nn.Module):
                  score_sel_hid=64,
                  temperature=0.01,
                  k=6,
-                 lambda1=0.1,
-                 lambda2=1.0,
-                 lambda3=0.1,
                  device=torch.device("cpu")
                  ):
         """
@@ -67,17 +64,9 @@ class TNT(nn.Module):
         self.m = m
         self.k = k
 
-        self.lambda1 = lambda1
-        self.lambda2 = lambda2
-        self.lambda3 = lambda3
         self.with_aux = with_aux
 
         self.device = device
-        self.criterion = TNTLoss(
-            self.lambda1, self.lambda2, self.lambda3,
-            self.m, self.k, temperature,
-            aux_loss=self.with_aux, device=self.device
-        )
 
         # feature extraction backbone
         self.backbone = VectorNetBackbone(
@@ -144,7 +133,9 @@ class TNT(nn.Module):
         _, indices = target_prob.topk(self.m, dim=1)
         batch_idx = torch.vstack([torch.arange(0, batch_size, device=self.device) for _ in range(self.m)]).T
         target_pred_se, offset_pred_se = target_candidate[batch_idx, indices], offset[batch_idx, indices]
+
         trajs = self.motion_estimator(target_feat, target_pred_se + offset_pred_se)
+
         score = self.traj_score_layer(target_feat, trajs)
 
         return {
@@ -154,23 +145,6 @@ class TNT(nn.Module):
             "traj": trajs,
             "score": score
         }, aux_out, aux_gt
-
-    def loss(self, data):
-        """
-        compute loss according to the gt
-        :param data: node feature data
-        :return: loss
-        """
-        n = data.candidate_len_max[0]
-        pred, aux_out, aux_gt = self.forward(data)
-
-        gt = {
-            "target_prob": data.candidate_gt.view(-1, n),
-            "offset": data.offset_gt.view(-1, 2),
-            "y": data.y.view(-1, self.horizon * 2)
-        }
-
-        return self.criterion(pred, gt, aux_out, aux_gt)
 
     def inference(self, data):
         """
@@ -200,7 +174,7 @@ class TNT(nn.Module):
         # score the predicted trajectory and select the top k trajectory
         score = self.traj_score_layer(target_feat, traj_pred)
 
-        return self.traj_selection(traj_pred, score)
+        return self.traj_selection(traj_pred, score).view(batch_size, self.k, self.horizon, 2)
 
     def candidate_sampling(self, data):
         """
@@ -211,7 +185,7 @@ class TNT(nn.Module):
         raise NotImplementedError
 
     # todo: determine appropiate threshold
-    def traj_selection(self, traj_in, score, threshold=0.01):
+    def traj_selection(self, traj_in, score, threshold=16):
         """
         select the top k trajectories according to the score and the distance
         :param traj_in: candidate trajectories, [batch, M, horizon * 2]
@@ -222,21 +196,22 @@ class TNT(nn.Module):
         # re-arrange trajectories according the the descending order of the score
         _, batch_order = score.sort(descending=True)
         traj_pred = torch.cat([traj_in[i, order] for i, order in enumerate(batch_order)], dim=0).view(-1, self.m, self.horizon * 2)
-        traj_selected = traj_pred[:, :self.k]                                   # [batch_size, k, horizon * 2]
+        traj_selected = traj_pred[:, :self.k].clone()                                   # [batch_size, k, horizon * 2]
 
         # check the distance between them, NMS, stop only when enough trajs collected
         for batch_id in range(traj_pred.shape[0]):                              # one batch for a time
             traj_cnt = 1
+            thres = threshold
             while traj_cnt < self.k:
                 for j in range(1, self.m):
                     dis = distance_metric(traj_selected[batch_id, :traj_cnt], traj_pred[batch_id, j].unsqueeze(0))
-                    if not torch.any(dis < threshold):
-                        traj_selected[batch_id, traj_cnt] = traj_pred[batch_id, j]
+                    if not torch.any(dis < thres):
+                        traj_selected[batch_id, traj_cnt] = traj_pred[batch_id, j].clone()
 
                         traj_cnt += 1
                     if traj_cnt >= self.k:
                         break
-                threshold /= 2.0
+                thres /= 2.0
 
         return traj_selected
 

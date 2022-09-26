@@ -140,15 +140,18 @@ class ArgoverseInMem(InMemoryDataset):
 
         # pad feature with zero nodes
         data.x = torch.cat([data.x, torch.zeros((index_to_pad - valid_len, feature_len), dtype=data.x.dtype)])
-        data.cluster = torch.cat([data.cluster, torch.arange(valid_len, index_to_pad)]).long()
-        data.identifier = torch.cat([data.identifier, torch.zeros((index_to_pad - valid_len, 2), dtype=data.x.dtype)])
+        data.cluster = torch.cat([data.cluster, torch.arange(valid_len, index_to_pad, dtype=data.cluster.dtype)]).long()
+        data.identifier = torch.cat([data.identifier, torch.zeros((index_to_pad - valid_len, 2), dtype=data.identifier.dtype)])
 
         # pad candidate and candidate_gt
         num_cand_max = data.candidate_len_max[0].item()
         data.candidate_mask = torch.cat([torch.ones((len(data.candidate), 1)),
                                          torch.zeros((num_cand_max - len(data.candidate), 1))])
-        data.candidate = torch.cat([data.candidate, torch.zeros((num_cand_max - len(data.candidate), 2))])
-        data.candidate_gt = torch.cat([data.candidate_gt, torch.zeros((num_cand_max - len(data.candidate_gt), 1))])
+        data.candidate = torch.cat([data.candidate[:, :2], torch.zeros((num_cand_max - len(data.candidate), 2))])
+        data.candidate_gt = torch.cat([data.candidate_gt,
+                                       torch.zeros((num_cand_max - len(data.candidate_gt), 1), dtype=data.candidate_gt.dtype)])
+
+        assert data.cluster.shape[0] == data.x.shape[0], "[ERROR]: Loader error!"
 
         return data
 
@@ -381,9 +384,7 @@ class ArgoverseInDisk(Dataset):
 if __name__ == "__main__":
 
     # for folder in os.listdir("./data/interm_data"):
-    INTERMEDIATE_DATA_DIR = "../../dataset/interm_data_small"
-    # INTERMEDIATE_DATA_DIR = "../../dataset/interm_tnt_n_s_0804"
-    # INTERMEDIATE_DATA_DIR = "/media/Data/autonomous_driving/Argoverse/intermediate"
+    INTERMEDIATE_DATA_DIR = "../../dataset/interm_data"
 
     for folder in ["train", "val", "test"]:
     # for folder in ["test"]:
@@ -391,7 +392,7 @@ if __name__ == "__main__":
 
         # dataset = Argoverse(dataset_input_path)
         dataset = ArgoverseInMem(dataset_input_path).shuffle()
-        batch_iter = DataLoader(dataset, batch_size=16, num_workers=16, shuffle=True, pin_memory=True)
+        batch_iter = DataLoader(dataset, batch_size=16, num_workers=16, shuffle=True, pin_memory=False)
         for k in range(1):
             for i, data in enumerate(tqdm(batch_iter, total=len(batch_iter), bar_format="{l_bar}{r_bar}")):
                 pass
@@ -409,4 +410,3 @@ if __name__ == "__main__":
             # # print("type: {}".format(type(candit_gt)))
             # print("max: {}".format(candit_gt.max()))
             # print("min: {}".format(candit_gt.min()))
-

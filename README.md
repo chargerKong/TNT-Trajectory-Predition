@@ -12,14 +12,26 @@ and
 
 
 ### Achieved Best Performance
-The best performance achieved by our implementation and reported in the papers. 
+The best performance achieved by our implementation and reported in the papers on the evaluation dataset. 
 
-| Algorithm | minADE(K=1) |   minFDE(K=1)   | MR(2.0m) | minADE(K=6) | minFDE(K=6) | MR(2.0m) |
-| :-------: |:-----------:|:---------------:|:--------:| :----------:| :---------: | :-------:|
-| VectorNet (Original) |    1.66     |      3.67       |    -     | -           | -           | -        |
-| VectorNet (**Ours**) |    1.49     |      3.25       |  0.561   | -           | -           | -        |
-|  TNT(Original)   |      -      |        -        |    -     | 0.728       | 1.292       | 0.093    |
-|  TNT(**Ours**)   |      -      |        -        |    -     | 1.138       | 2.123       | 0.286    |
+| Algorithm | minADE(K=1) | minFDE(K=1) | MR(2.0m) | minADE(K=6) | minFDE(K=6) | MR(2.0m) |
+| :-------: |:-----------:|:-----------:|:--------:|:-----------:|:-----------:|:--------:|
+| VectorNet (Original) |    1.66     |    3.67     |    -     |      -      |      -      |    -     |
+| VectorNet (**Ours**) |    1.46     |    3.15     |  0.548   |      -      |      -      |    -     |
+|  TNT(Original)   |      -      |      -      |    -     |    0.728    |    1.292    |  0.093   |
+|  TNT(**Ours**)   |      -      |      -      |    -     |    0.928    |    1.686    |  0.195   |
+
+The best performance achieved by our implementation and reported in the papers on the test dataset on 
+[Argoverse Leaderboard](https://eval.ai/web/challenges/challenge-page/454/leaderboard).
+
+|    Algorithm     |  minADE(K=6)  | minFDE(K=6)  | MR(2.0m)  |
+|:----------------:|:-------------:|:------------:|:---------:|
+| 	TNT - CoRL20    |    0.9097     |    1.4457    |  0.1656   |
+|  	CUHK RPAI (TNT_20220819)   |    1.1518     |    2.1322    |  0.2585   |
+
+
+* [VectorNet Pre-trained Weights](https://mycuhk-my.sharepoint.com/:u:/g/personal/1155071948_link_cuhk_edu_hk/Ee7FZXGwXB9Mh7O7wSHjAlUBH5uB1fP9LEXPP8TS1lSFTQ?e=ajPXMo)
+* [TNT Pre-trained Weights](https://mycuhk-my.sharepoint.com/:u:/g/personal/1155071948_link_cuhk_edu_hk/EfgqFbzKKJlJle7E-y-DVCkBVQQQH09CUwTDN5GfjtYAOg?e=mUINGD)
 
 ## Setup
 
@@ -27,7 +39,12 @@ The best performance achieved by our implementation and reported in the papers.
 This implementation has been tested on Ubuntu 18.04 and has the following requirements:
 * python == 3.8.8
 * pytorch == 1.8.1
-* torch-geometric == 1.7.2
+* torch-geometric == 1.7.2 (The version of related libraries are listed as follows.)
+  * pytorch-cluster == 1.5.9          
+  * pytorch-geometric == 1.7.2           
+  * pytorch-scatter == 2.0.7           
+  * pytorch-sparse == 0.6.10         
+  * pytorch-spline-conv == 1.2.1
 * pandas == 1.0.0
 * tqdm == 4.60.0
 * tensorboard
@@ -64,6 +81,10 @@ If you store the raw data at a different location, you can change relative path 
 > **ATTENTION**: If you aren't familiar with the bash script and path routing, just follow the directory structure.
 
 > **Reminding**: Change the mode of the bash file with "chmod +x scripts/preprocessing.sh" before running the script for the first time.
+
+An example of the processed dataset(small) is available 
+[here](https://mycuhk-my.sharepoint.com/:u:/g/personal/1155071948_link_cuhk_edu_hk/EWv6Dec3yqhPkZLgdw9eEt0Bso2K-ef1-7UOzklwc4NDPQ?e=2TIBGX).
+Download it to check if your environment is configured appropriately. 
 
 ## Usage
 

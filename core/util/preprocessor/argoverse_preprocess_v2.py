@@ -6,6 +6,7 @@ import os
 import argparse
 from os.path import join as pjoin
 import copy
+import sys
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -27,6 +28,8 @@ from core.util.preprocessor.base import Preprocessor
 from core.util.cubic_spline import Spline2D
 
 warnings.filterwarnings("ignore")
+
+RESCALE_LENGTH = 1.0    # the rescale length th turn the lane vector into equal distance pieces
 
 
 class ArgoversePreprocessor(Preprocessor):
@@ -163,18 +166,28 @@ class ArgoversePreprocessor(Preprocessor):
         # get the target candidates and candidate gt
         agt_traj_obs = data['trajs'][0][0: self.obs_horizon].copy().astype(np.float32)
         agt_traj_fut = data['trajs'][0][self.obs_horizon:self.obs_horizon+self.pred_horizon].copy().astype(np.float32)
+<<<<<<< HEAD
         # 给出可能的中心线
         # 多条中心线，一条s to e 对应一个np.array
         ctr_line_candts = self.am.get_candidate_centerlines_for_traj(agt_traj_obs, data['city'])
+=======
+        ctr_line_candts = self.am.get_candidate_centerlines_for_traj(agt_traj_obs, data['city'], viz=False)
+>>>>>>> 9180637f81304c3d9aaf28ea88e572d779618e36
 
         # rotate the center lines and find the reference center line
         agt_traj_fut = np.matmul(rot, (agt_traj_fut - orig.reshape(-1, 2)).T).T
         for i, _ in enumerate(ctr_line_candts):
             # 减去原点 做旋转
             ctr_line_candts[i] = np.matmul(rot, (ctr_line_candts[i] - orig.reshape(-1, 2)).T).T
+<<<<<<< HEAD
         # 把多条中心线(多个list)进行合并（合并为一个list），并下采样
         tar_candts = self.lane_candidate_sampling(ctr_line_candts, viz=False)
         # ？？
+=======
+
+        tar_candts = self.lane_candidate_sampling(ctr_line_candts, [0, 0], viz=False)
+
+>>>>>>> 9180637f81304c3d9aaf28ea88e572d779618e36
         if self.split == "test":
             tar_candts_gt, tar_offse_gt = np.zeros((tar_candts.shape[0], 1)), np.zeros((1, 2))
             splines, ref_idx = None, None
@@ -302,6 +315,7 @@ class ArgoversePreprocessor(Preprocessor):
             # 找该lane的车道中心线
             lane = self.am.city_lane_centerlines_dict[data['city']][lane_id]
             lane = copy.deepcopy(lane)
+
             centerline = np.matmul(data['rot'], (lane.centerline - data['orig'].reshape(-1, 2)).T).T
             x, y = centerline[:, 0], centerline[:, 1]
             if x.max() < x_min or x.min() > x_max or y.max() < y_min or y.min() > y_max:
@@ -465,6 +479,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--small", action='store_true', default=False)
     args = parser.parse_args()
 
+    # args.root = "/home/jb/projects/Code/trajectory-prediction/TNT-Trajectory-Predition/dataset"
     raw_dir = os.path.join(args.root, "raw_data")
     interm_dir = os.path.join(args.dest, "interm_data" if not args.small else "interm_data_small")
     # print(args.root)
@@ -474,8 +489,8 @@ if __name__ == "__main__":
         # construct the preprocessor and dataloader
         argoverse_processor = ArgoversePreprocessor(root_dir=raw_dir, split=split, save_dir=interm_dir)
         loader = DataLoader(argoverse_processor,
-                            batch_size=16,
-                            num_workers=16,
+                            batch_size=1 if sys.gettrace() else 16,     # 1 batch in debug mode
+                            num_workers=0 if sys.gettrace() else 16,    # use only 0 worker in debug mode
                             shuffle=False,
                             pin_memory=False,
                             drop_last=False)

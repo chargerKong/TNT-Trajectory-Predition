@@ -2,15 +2,15 @@ import os
 import sys
 from os.path import join as pjoin
 from datetime import datetime
-
+import json
 import argparse
 
 # from torch.utils.data import DataLoader
 from torch_geometric.data import DataLoader
 
-from core.dataloader.dataset import GraphDataset
-from core.dataloader.argoverse_loader import Argoverse, GraphData
-from core.dataloader.argoverse_loader_v2 import ArgoverseInMem as ArgoverseInMemv2
+# from core.dataloader.dataset import GraphDataset
+# from core.dataloader.argoverse_loader import Argoverse, GraphData
+from core.dataloader.argoverse_loader_v2 import ArgoverseInMem as ArgoverseInMemv2, GraphData
 from core.trainer.vectornet_trainer import VectorNetTrainer
 
 TEST = False
@@ -25,27 +25,8 @@ def train(n_gpu, args):
     :return:
     """
     # data loading
-    # train_set = GraphDataset(pjoin(args.data_root, "train_intermediate")).shuffle()
-    # eval_set = GraphDataset(pjoin(args.data_root, "val_intermediate"))
-    # test_set = GraphDataset(pjoin(args.data_root, "val_intermediate"))
-
     train_set = ArgoverseInMemv2(pjoin(args.data_root, "train_intermediate")).shuffle()
     eval_set = ArgoverseInMemv2(pjoin(args.data_root, "val_intermediate"))
-
-    # loader = DataLoader
-    # t_loader = loader(train_set[:10] if TEST else train_set,
-    #                   batch_size=args.batch_size,
-    #                   num_workers=args.num_workers,
-    #                   pin_memory=True,
-    #                   shuffle=True)
-    # e_loader = loader(eval_set[:2] if TEST else eval_set,
-    #                   batch_size=args.batch_size,
-    #                   num_workers=args.num_workers,
-    #                   pin_memory=True)
-    # ts_loader = loader(test_set[:1] if TEST else test_set,
-    #                    batch_size=1,
-    #                    num_workers=1,
-    #                    pin_memory=True)
 
     # init output dir
     time_stamp = datetime.now().strftime("%m-%d-%H-%M")
@@ -55,6 +36,10 @@ def train(n_gpu, args):
             raise Exception("The output folder does exists and is not empty! Check the folder.")
         else:
             os.makedirs(output_dir)
+
+            # dump the args
+            with open(pjoin(output_dir, 'conf.json'), 'w') as fp:
+                json.dump(vars(args), fp, indent=4, separators=(", ", ": "))
 
     # init trainer
     trainer = VectorNetTrainer(
@@ -103,7 +88,7 @@ def train(n_gpu, args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("-d", "--data_root", required=False, type=str, default="dataset/interm_tnt_n_s_0804_small",
+    parser.add_argument("-d", "--data_root", required=False, type=str, default="dataset/interm_data_small",
                         help="root dir for datasets")
     parser.add_argument("-o", "--output_dir", required=False, type=str, default="run/vectornet/",
                         help="ex)dir to save checkpoint and model")
@@ -113,7 +98,7 @@ if __name__ == "__main__":
     parser.add_argument("-a", "--aux_loss", action="store_true", default=True,
                         help="Training with the auxiliary recovery loss")
 
-    parser.add_argument("-b", "--batch_size", type=int, default=64,
+    parser.add_argument("-b", "--batch_size", type=int, default=256,
                         help="number of batch_size")
     parser.add_argument("-e", "--n_epoch", type=int, default=50,
                         help="number of epochs")
