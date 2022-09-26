@@ -11,10 +11,11 @@ import pandas as pd
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 from scipy import sparse
-
+import sys
+sys.path.append("./")
 import warnings
 
-# import torch
+# import torchprint
 from torch.utils.data import Dataset, DataLoader
 
 from argoverse.data_loading.argoverse_forecasting_loader import ArgoverseForecastingLoader
@@ -55,8 +56,9 @@ class ArgoversePreprocessor(Preprocessor):
         f_path = self.loader.seq_list[idx]
         seq = self.loader.get(f_path)
         path, seq_f_name_ext = os.path.split(f_path)
+        # 2.csv => ("2", ".csv")
         seq_f_name, ext = os.path.splitext(seq_f_name_ext)
-
+        # 获得文件的具体数据，pd.DataFrame
         df = copy.deepcopy(seq.seq_df)
         return self.process_and_save(df, seq_id=seq_f_name, dir_=self.save_dir)
 
@@ -78,36 +80,55 @@ class ArgoversePreprocessor(Preprocessor):
 
     @staticmethod
     def read_argo_data(df: pd.DataFrame):
+        """
+        return: dict, key有 data['trajs'] 和 data['steps']
+        data['trajs']: List[List[int]]. 第一个List是AGENT下的XY数据.第二个往后是其他trackingID的数据
+        data['steps']: List[List[int]]. 第一个List是对应AGENT的数据 所在的时间戳序号。第二个往后是其他rackingID的数据的时间戳序号
+                       表示该ID 追踪的时间，时长一共五秒，分为50个序号。
+                       第一个AGENT跟踪时长为5秒，所以steps从0-49都有
+        """
         city = df["CITY_NAME"].values[0]
 
         """TIMESTAMP,TRACK_ID,OBJECT_TYPE,X,Y,CITY_NAME"""
         agt_ts = np.sort(np.unique(df['TIMESTAMP'].values))
         mapping = dict()
+        # 把所有的时间做序号，0，1，2，3，4，...
         for i, ts in enumerate(agt_ts):
             mapping[ts] = i
 
         trajs = np.concatenate((
             df.X.to_numpy().reshape(-1, 1),
             df.Y.to_numpy().reshape(-1, 1)), 1)
-
+        # 给出原数据时间戳对应的时间序号
         steps = [mapping[x] for x in df['TIMESTAMP'].values]
         steps = np.asarray(steps, np.int64)
-
+        # 按照追踪物体的类别分类，并且提取出物体类别
         objs = df.groupby(['TRACK_ID', 'OBJECT_TYPE']).groups
+        # keys = [('00000000-0000-0000-0000-000000000000', 'AV'),('00000000-0000-0000-0000-000000019203', 'OTHERS')...]
+        # 获取所有追踪物体的ID
         keys = list(objs.keys())
+        # 获取相应追踪物体ID的类别
         obj_type = [x[1] for x in keys]
-
+        # 找到类别的AGENT的序号
         agt_idx = obj_type.index('AGENT')
+        # 找到类别为AGENT下的数据序号
+        # [ 6,   18,  28,  40,  55,  66,  78,  90,  103, 115, 128, 140, 151,
+        #   163, 175, 183, 195, 207, 219, 230, 238, 253, 263, 268, 286, 299,
+        #   312, 328, 343, 359, 372, 387, 402, 410, 424, 438, 457, 471, 483,
+        #   495, 509, 522, 535, 549, 566, 580, 596, 612, 628, 644]
         idcs = objs[keys[agt_idx]]
-
+        # 提取出类别为AGENT下的数据
         agt_traj = trajs[idcs]
+        # 提取出对应AGENT的数据，它所在的时间戳序号【0，1，2，3，4...】
         agt_step = steps[idcs]
 
         del keys[agt_idx]
         ctx_trajs, ctx_steps = [], []
         for key in keys:
             idcs = objs[key]
+            # 找到其他某一类下的数据
             ctx_trajs.append(trajs[idcs])
+            # 找到该类下的数据所对应的时间戳
             ctx_steps.append(steps[idcs])
 
         data = dict()
@@ -117,6 +138,9 @@ class ArgoversePreprocessor(Preprocessor):
         return data
 
     def get_obj_feats(self, data):
+        """
+        return: data: 包括中心线，agent的轨迹
+        """
         # get the origin and compute the oritentation of the target agent
         orig = data['trajs'][0][self.obs_horizon-1].copy().astype(np.float32)
 
@@ -139,14 +163,18 @@ class ArgoversePreprocessor(Preprocessor):
         # get the target candidates and candidate gt
         agt_traj_obs = data['trajs'][0][0: self.obs_horizon].copy().astype(np.float32)
         agt_traj_fut = data['trajs'][0][self.obs_horizon:self.obs_horizon+self.pred_horizon].copy().astype(np.float32)
+        # 给出可能的中心线
+        # 多条中心线，一条s to e 对应一个np.array
         ctr_line_candts = self.am.get_candidate_centerlines_for_traj(agt_traj_obs, data['city'])
 
         # rotate the center lines and find the reference center line
         agt_traj_fut = np.matmul(rot, (agt_traj_fut - orig.reshape(-1, 2)).T).T
         for i, _ in enumerate(ctr_line_candts):
+            # 减去原点 做旋转
             ctr_line_candts[i] = np.matmul(rot, (ctr_line_candts[i] - orig.reshape(-1, 2)).T).T
-
+        # 把多条中心线(多个list)进行合并（合并为一个list），并下采样
         tar_candts = self.lane_candidate_sampling(ctr_line_candts, viz=False)
+        # ？？
         if self.split == "test":
             tar_candts_gt, tar_offse_gt = np.zeros((tar_candts.shape[0], 1)), np.zeros((1, 2))
             splines, ref_idx = None, None
@@ -170,10 +198,24 @@ class ArgoversePreprocessor(Preprocessor):
             # collect the future prediction ground truth
             gt_pred = np.zeros((self.pred_horizon, 2), np.float32)
             has_pred = np.zeros(self.pred_horizon, np.bool)
+            # 假如后3秒的数据有的话，把后3秒的数据，即后边30个index找到
+            # step 为0 到 49之间的任意连续的序列，因为物体出现的时间不定
+            # 找到step 在20-49之间的index, 设置为true
+            # 比如是一段20 - 35之间为true的mask
             future_mask = np.logical_and(step >= self.obs_horizon, step < self.obs_horizon + self.pred_horizon)
+            # post_step = [ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16,
+            # 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+            # 找到step 在20-49之间的index - 20
             post_step = step[future_mask] - self.obs_horizon
+            # 截取出预测时间的轨迹XY，从原轨迹的第二十个开始取
             post_traj = traj_nd[future_mask]
+            # 记录真实值的轨迹{点0，点1，...}
             gt_pred[post_step] = post_traj
+            # array([ True,  True,  True,  True,  True,  True,  True,  True,  True,
+            # True,  True,  True,  True,  True,  True,  True ...
+            # 表示预测部分有多少个时间是有数据点的
+            # 比如在20之后有10个数据，has_pred 就有10个true
+            # 可以方便后续使用gt_pred[has_pred]取出数据
             has_pred[post_step] = True
 
             # colect the observation
@@ -192,19 +234,22 @@ class ArgoversePreprocessor(Preprocessor):
 
             if len(step_obs) <= 1:
                 continue
-
+            # obs_horizon行3列
             feat = np.zeros((self.obs_horizon, 3), np.float32)
+            # obs_horizon个false，即代表obs_horizon个时间戳下的观察数据
             has_obs = np.zeros(self.obs_horizon, np.bool)
-
+            # feat 前两列为观察的轨迹
             feat[step_obs, :2] = traj_obs
+            # feat 第三列为1.0
             feat[step_obs, 2] = 1.0
             has_obs[step_obs] = True
-
+            # 判断最后一个点的x和y是不是超出了观测范围
             if feat[-1, 0] < x_min or feat[-1, 0] > x_max or feat[-1, 1] < y_min or feat[-1, 1] > y_max:
                 continue
-
+            # 观察的轨迹XY
             feats.append(feat)                  # displacement vectors
             has_obss.append(has_obs)
+            # 真实值的轨迹XY
             gt_preds.append(gt_pred)
             has_preds.append(has_pred)
 
@@ -246,11 +291,15 @@ class ArgoversePreprocessor(Preprocessor):
         """Get a rectangle area defined by pred_range."""
         x_min, x_max, y_min, y_max = -self.obs_range, self.obs_range, -self.obs_range, self.obs_range
         radius = max(abs(x_min), abs(x_max)) + max(abs(y_min), abs(y_max))
+        # 返回以orig为原点，曼哈顿距离半径为radius范围内的所有lane id
         lane_ids = self.am.get_lane_ids_in_xy_bbox(data['orig'][0], data['orig'][1], data['city'], radius * 1.5)
         lane_ids = copy.deepcopy(lane_ids)
 
         lanes = dict()
+        # 把对应lane_id的lane加入到lanes中
+        # 每一个lane包括中心线，多边形等
         for lane_id in lane_ids:
+            # 找该lane的车道中心线
             lane = self.am.city_lane_centerlines_dict[data['city']][lane_id]
             lane = copy.deepcopy(lane)
             centerline = np.matmul(data['rot'], (lane.centerline - data['orig'].reshape(-1, 2)).T).T
@@ -320,6 +369,7 @@ class ArgoversePreprocessor(Preprocessor):
         for i in np.unique(lane_idcs):
             line_ctr = lines_ctrs[lane_idcs == i]
             line_feat = lines_feats[lane_idcs == i]
+            # confirm two centerline connected
             line_str = (2.0 * line_ctr - line_feat) / 2.0
             line_end = (2.0 * line_ctr[-1, :] + line_feat[-1, :]) / 2.0
             line = np.vstack([line_str, line_end.reshape(-1, 2)])
@@ -417,8 +467,10 @@ if __name__ == "__main__":
 
     raw_dir = os.path.join(args.root, "raw_data")
     interm_dir = os.path.join(args.dest, "interm_data" if not args.small else "interm_data_small")
-
-    for split in ["train", "val", "test"]:
+    # print(args.root)
+    # print(args.small)
+    # for split in ["train", "val", "test"]:
+    for split in ["val"]:
         # construct the preprocessor and dataloader
         argoverse_processor = ArgoversePreprocessor(root_dir=raw_dir, split=split, save_dir=interm_dir)
         loader = DataLoader(argoverse_processor,
